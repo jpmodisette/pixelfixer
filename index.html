@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ChatGPT "Pixel Art" Fixer</title>
+  <style>
+    :root { --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#38bdf8; }
+    html,body{height:100%;}
+    body{margin:0; font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial; background:linear-gradient(180deg,#0b1020,#0f172a); color:var(--text);}    
+    .wrap{max-width:1200px; margin:24px auto; padding:24px;}
+    .title{font-size:28px; font-weight:700; letter-spacing:.2px; margin:0 0 6px}
+    .subtitle{color:var(--muted); margin:0 0 24px;}
+    .grid{display:grid; grid-template-columns:1fr 320px; gap:20px}
+    .panes{display:grid; grid-template-columns:1fr 1fr; gap:20px}
+    .card{background:rgba(17,24,39,.6); border:1px solid rgba(148,163,184,.15); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.25);}
+    .card-header{display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid rgba(148,163,184,.12);}
+    .card-title{font-weight:600; letter-spacing:.2px}
+    .card-body{padding:14px}
+    .dropzone{position:relative; display:inline-block; place-items:center; height:auto; width:auto; border:1px dashed rgba(148,163,184,.35); border-radius:12px; background:rgba(2,6,23,.35)}
+    .dropzone .hint{position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); text-align:center; padding:16px; pointer-events:none}
+    .canvas{display:block}
+    .controls{display:flex; flex-direction:column; gap:12px}
+    .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+    .row > *{flex:1}
+    button, select, input[type="file"]{background:#0b1220; border:1px solid rgba(148,163,184,.25); color:var(--text); padding:10px 12px; border-radius:10px; font-size:14px}
+    button{cursor:pointer; user-select:none}
+    button.primary{background:linear-gradient(180deg,#0ea5e9,#0284c7); border-color:transparent}
+    button:disabled{opacity:.6; cursor:not-allowed}
+    .small{font-size:12px; color:var(--muted)}
+    .kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; background:#0a0f1f; border:1px solid rgba(148,163,184,.25); padding:0 6px; border-radius:6px}
+    .spacer{height:6px}
+    .footer{margin-top:10px; font-size:12px; color:var(--muted)}
+    .pill{display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid rgba(148,163,184,.25);}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="title">ChatGPT "Pixel Art" Fixer</h1>
+    <p class="subtitle">When you ask ChatGPT for pixel art, the result doesn't necessarily have consistent pixel boundaries or sizes.  This converts it to real pixel art with square pixels.  Paste (<span class="kbd">Ctrl/Cmd+V</span>) or drop an image into the left pane, then click <b>Fix Pixels</b>. Copy or download from the right pane.</p>
+
+    <div class="grid">
+      <div class="panes">
+        <!-- INPUT CARD -->
+        <section class="card" id="inputCard">
+          <div class="card-header">
+            <div class="card-title">Input</div>
+            <label class="pill" style="cursor:pointer">
+              <input id="fileInput" type="file" accept="image/*" hidden />
+              Choose image
+            </label>
+          </div>
+          <div class="card-body">
+            <div class="dropzone" id="dropIn" tabindex="0" contenteditable="true" aria-label="Paste or drop image here">
+              <canvas id="inCanvas" class="canvas"></canvas>
+              <div class="hint" id="inHint">
+                <div>
+                  <div>Paste an image with <span class="kbd">Ctrl/Cmd+V</span></div>
+                  <div class="spacer"></div>
+                  <div>…or drag & drop / use the button above</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- OUTPUT CARD -->
+        <section class="card" id="outputCard">
+          <div class="card-header">
+            <div class="card-title">Output</div>
+            <div class="row" style="gap:8px; width:auto">
+              <button id="copyBtn" title="Copy to Clipboard">Copy</button>
+              <button id="downloadBtn" title="Download PNG">Download</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="dropzone">
+              <canvas id="outCanvas" class="canvas"></canvas>
+              <div class="hint" id="outHint">Run a transform to see the result here</div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- CONTROLS CARD -->
+      <aside class="card">
+        <div class="card-header">
+          <div class="card-title">Transform</div>
+          <span class="small">Non-destructive preview</span>
+        </div>
+        <div class="card-body">
+          <div class="controls">
+            <div class="row">
+              <button id="applyBtn" class="primary">Fix Pixels</button>
+            </div>
+
+            <!-- dynamic sliders container -->
+            <div id="dynamicOpts"></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const inCanvas = document.getElementById('inCanvas');
+  const outCanvas = document.getElementById('outCanvas');
+  const inCtx = inCanvas.getContext('2d');
+  const outCtx = outCanvas.getContext('2d');
+
+  const dropIn = document.getElementById('dropIn');
+  const inHint = document.getElementById('inHint');
+  const outHint = document.getElementById('outHint');
+  const fileInput = document.getElementById('fileInput');
+
+  const applyBtn = document.getElementById('applyBtn');
+  const copyBtn = document.getElementById('copyBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const dynamicOpts = document.getElementById('dynamicOpts');
+
+  let hasInput = false;
+  let currentImageBitmap = null;
+
+  // ---------- Image Loading Helpers ----------
+  function setCanvasToBitmap(canvas, ctx, bmp){
+    canvas.width = bmp.width;
+    canvas.height = bmp.height;
+    // clear
+    ctx.clearRect(0,0,canvas.width, canvas.height);
+    ctx.drawImage(bmp, 0, 0);
+  }
+
+  async function loadFile(file){
+    if(!file || !file.type.startsWith('image/')) return;
+    const bmp = await createImageBitmap(file);
+    currentImageBitmap = bmp;
+    setCanvasToBitmap(inCanvas, inCtx, bmp);
+    inHint.style.display = 'none';
+    hasInput = true;
+    outCtx.clearRect(0,0,outCanvas.width,outCanvas.height);
+    outHint.style.removeProperty('display');
+  }
+
+  // Robust paste handling (Chrome + Firefox + URL fallbacks)
+  function handlePaste(e){
+    const dt = e.clipboardData; if(!dt) return;
+    let handled = false;
+
+    // 1) Chrome: DataTransferItem of kind=file, type image/*
+    for(const item of dt.items || []){
+      if(item.kind === 'file' && item.type && item.type.startsWith('image/')){
+        e.preventDefault();
+        const file = item.getAsFile();
+        if(file) loadFile(file);
+        handled = true;
+        break;
+      }
+    }
+    if(handled) return;
+
+    // 2) Firefox: dt.files contains pasted image
+    for(const file of dt.files || []){
+      if(file.type && file.type.startsWith('image/')){
+        e.preventDefault();
+        loadFile(file);
+        return;
+      }
+    }
+
+    // 3) Fallback: an <img src> in HTML, or a URL in uri-list/plain text
+    let url = null;
+    const html = dt.getData('text/html');
+    if(html){
+      const m = html.match(/<img[^>]+src=\"([^\"]+)/i);
+      if(m) url = m[1];
+    }
+    if(!url){
+      const uri = dt.getData('text/uri-list') || dt.getData('text/plain');
+      if(uri && /^https?:/i.test(uri)) url = uri.trim();
+    }
+    if(url){
+      e.preventDefault();
+      loadFromUrl(url);
+    }
+  }
+
+  // Listen both on the dropzone and document so users don't have to focus first
+  dropIn.addEventListener('paste', handlePaste);
+  document.addEventListener('paste', handlePaste);
+
+  // Drag & drop
+  ['dragenter','dragover'].forEach(evt => dropIn.addEventListener(evt, e=>{ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; dropIn.style.borderColor = 'var(--accent)'; }));
+  ['dragleave','drop'].forEach(evt => dropIn.addEventListener(evt, e=>{ e.preventDefault(); dropIn.style.borderColor = 'rgba(148,163,184,.35)'; }));
+  dropIn.addEventListener('drop', async (e)=>{
+    const file = e.dataTransfer.files?.[0];
+    await loadFile(file);
+  });
+
+  // File input
+  fileInput.addEventListener('change', ()=>{
+    const f = fileInput.files?.[0];
+    loadFile(f);
+  });
+
+  // Focus ring affordance for paste hint
+  dropIn.addEventListener('focus',()=>{ dropIn.style.outline = '2px solid var(--accent)'; });
+  dropIn.addEventListener('blur',()=>{ dropIn.style.outline = 'none'; });
+
+  // ---------- Transform Controls ----------
+  function setDynamicOptions(){
+    dynamicOpts.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    const sliderRow1 = makeSlider('Color-Averaging Patch Size', 'min_pixel', 1, 40, 2);
+    const sliderRow2 = makeSlider('Approx Max Pixel Size', 'max_pixel', 2, 40, 12);
+    frag.appendChild(sliderRow1);
+    frag.appendChild(sliderRow2);
+    dynamicOpts.appendChild(frag);
+  }
+
+  function makeToggle(label, id, checked=false){
+    const wrap = document.createElement('div');
+    wrap.className = 'row';
+    const lab = document.createElement('label');
+    lab.textContent = label;
+    lab.style.flex = '0 0 130px';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = id;
+    input.checked = checked;
+    const badge = document.createElement('span');
+    badge.className = 'small pill';
+    badge.textContent = checked ? 'On' : 'Off';
+    input.addEventListener('change', ()=>{ badge.textContent = input.checked ? 'On' : 'Off'; });
+    wrap.appendChild(lab);
+    wrap.appendChild(input);
+    wrap.appendChild(badge);
+    return wrap;
+  }
+
+  function makeSlider(label, id, min, max, value){
+    const wrap = document.createElement('div');
+    wrap.className = 'row';
+    const lab = document.createElement('label');
+    lab.textContent = label;
+    lab.style.flex = '0 0 130px';
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = String(min);
+    input.max = String(max);
+    input.value = String(value);
+    input.id = id;
+    input.oninput = ()=>{
+      const badge = wrap.querySelector('span.small');
+      badge.textContent = input.value;
+    };
+    const badge = document.createElement('span');
+    badge.className = 'small pill';
+    badge.textContent = String(value);
+    wrap.appendChild(lab);
+    wrap.appendChild(input);
+    wrap.appendChild(badge);
+    return wrap;
+  }
+
+  setDynamicOptions();
+
+  function applyTransform(){
+    if(!hasInput){ alert('Load an image first (paste, drop, or choose).'); return; }
+    window.autoPixelate(inCanvas, outCanvas, outCtx);
+    outHint.style.display = 'none';
+  }
+
+  function find_pixel_centers(measure, max_span) {
+    let centers = [];
+    for ( let i = 1; i < measure.length - 1; i++ ) {
+      let i_low = i - Math.round( max_span / 2 );
+      if ( i_low < 0 ) i_low = 0;
+      let i_high = i + Math.round( max_span / 2 );
+      if ( i_high > measure.length -1 ) i_high = measure.length - 1;
+      let is_local_min = 1;
+      for ( let ii = i_low; ii <= i_high; ii++ ) {
+        if ( measure[i] > measure[ii] ) is_local_min = 0;
+      }
+      if ( is_local_min == 1 ) {
+        i_low = i - max_span;
+        if ( i_low < 0 ) i_low = 0;
+        i_high = i + max_span;
+        if ( i_high > measure.length - 1 ) i_high = measure.length - 1;
+        let max_measure = 0;
+        for ( let ii = i_low; ii <= i_high; ii++ ) {
+          if ( measure[ii] > max_measure ) max_measure = measure[ii];
+        }
+        if ( measure[i] < max_measure * 0.5 ) {
+          centers.push( i );
+        }
+      }
+    }
+    return centers;
+  }
+
+  window.autoPixelate = function( inCanvas, outCanvas, outCtx ) {
+    const img = inCtx.getImageData( 0, 0, inCanvas.width, inCanvas.height );
+    const d = img.data;
+    let centers = [];
+    const low_span = Math.round( parseInt(document.getElementById('min_pixel')?.value || '7', 10) / 2);
+    const high_span = Math.round( parseInt(document.getElementById('max_pixel')?.value || '12', 10) / 2);
+    // dir = 0 finds the pixel center y values, 1 finds the pixel center x values
+    for ( let dir = 0; dir < 2; dir++ ) {
+      let dim_centers = [];
+      const max_dim = ( dir == 0 ) ? inCanvas.height : inCanvas.width;
+      const max_other_dim = ( dir == 0 ) ? inCanvas.width : inCanvas.height;
+      let measure = new Float32Array( max_dim );
+      for ( let i = 1; i < max_dim - 1; i++ ) {
+        measure[i] = 0;
+        for ( let j = 0; j < max_other_dim; j++ ) { // width for dir == 0, height for dir == 1
+          const x = ( dir == 0 ) ? j : i;
+          const y = ( dir == 0 ) ? i : j;
+          const x2 = x + (( dir==0 ) ? 0 : 1 );
+          const y2 = y + (( dir==0 ) ? 1 : 0 );
+          const x3 = x + (( dir==0 ) ? 0 : -1 );
+          const y3 = y + (( dir==0 ) ? -1 : 0 );
+          const offs = ( y * inCanvas.width + x ) * 4;
+          const offs2 = ( y2 * inCanvas.width + x2 ) * 4;
+          const offs3 = ( y3 * inCanvas.width + x3 ) * 4;
+          const diff2 = Math.abs( d[offs] - d[offs2] ) + Math.abs( d[offs + 1] - d[offs2 + 1] ) + Math.abs( d[offs + 2] - d[offs2 + 2] );
+          const diff3 = Math.abs( d[offs] - d[offs3] ) + Math.abs( d[offs + 1] - d[offs3 + 1] ) + Math.abs( d[offs + 2] - d[offs3 + 2] );
+          measure[i] += diff2 + diff3;
+        }
+      }
+      measure[0] = measure[1];
+      measure[max_dim - 1] = measure[max_dim - 2];
+      centers.push( find_pixel_centers( measure, high_span ) );
+    }
+    const x_centers = centers[1];
+    const y_centers = centers[0];
+    if ( centers[0].length == 0 || centers[1].length == 0 ) {
+      alert('Pixel fix failed!  Maybe this is not pixel art?');
+      return;
+    }
+    const block = Math.round( inCanvas.height / y_centers.length );
+    const out_width = x_centers.length * block;
+    const out_height = y_centers.length * block;
+    outCanvas.width = out_width;
+    outCanvas.height = out_height;
+    outCtx.clearRect( 0, 0, outCanvas.width, outCanvas.height );
+    const dst = outCtx.createImageData( out_width, out_height );
+    const dd = Math.round( low_span / 2 );
+    if ( dd < 1 ) dd = 1;
+    for ( let y_index = 0; y_index < y_centers.length; y_index++ ) {
+      for ( let x_index = 0; x_index < x_centers.length; x_index++ ) {
+        let ct = 0;
+        let d1 = 0;
+        let d2 = 0;
+        let d3 = 0;
+        let d4 = 0;
+        for ( let dx = -dd; dx <= dd; dx++ ) {
+          let x = x_centers[x_index] + dx;
+          if ( x < 0 ) x = 0;
+          if ( x > inCanvas.width - 1 ) x = inCanvas.width - 1;
+          for ( let dy = -dd; dy <= dd; dy++ ) {
+            let y = y_centers[y_index] + dy;
+            if ( y < 0 ) y = 0;
+            if ( y > inCanvas.height - 1 ) y = inCanvas.height - 1;
+            const from_offs = ( y * inCanvas.width + x ) * 4;
+            ct += 1;
+            d1 += d[from_offs];
+            d2 += d[from_offs + 1];
+            d3 += d[from_offs + 2];
+            d4 += d[from_offs + 3];
+          }
+        }
+        d1 = Math.round( d1 / ct );
+        d2 = Math.round( d2 / ct );
+        d3 = Math.round( d3 / ct );
+        d4 = Math.round( d4 / ct );
+        for ( let y_in_block = 0; y_in_block < block; y_in_block++ ) {
+          const to_y_offs = ( y_index * block + y_in_block ) * out_width;
+          for ( let x_in_block = 0; x_in_block < block; x_in_block++ ) {
+            const to_offs = ( to_y_offs + ( x_index * block + x_in_block ) ) * 4;
+            dst.data[to_offs] = d1;
+            dst.data[to_offs + 1] = d2;
+            dst.data[to_offs + 2] = d3;
+            dst.data[to_offs + 3] = d4;
+          }
+        }
+      }
+    }
+    outCtx.putImageData(dst,0,0);
+  };
+
+  function clamp(v){ return v<0?0:(v>255?255:v); }
+
+  applyBtn.addEventListener('click', applyTransform);
+
+  // ---------- Export Helpers ----------
+  copyBtn.addEventListener('click', async ()=>{
+    if(outCanvas.width === 0){ alert('No output yet. Click Apply first.'); return; }
+    try{
+      await new Promise(res=> outCanvas.toBlob(res, 'image/png'))
+        .then(async (blob)=>{
+          if(!blob) throw new Error('Blob failed');
+          if(navigator.clipboard && window.ClipboardItem){
+            await navigator.clipboard.write([ new ClipboardItem({ 'image/png': blob }) ]);
+          } else {
+            // Fallback: copy data URL as text
+            const dataUrl = await new Promise(r=>{ const u = outCanvas.toDataURL('image/png'); r(u); });
+            await navigator.clipboard.writeText(dataUrl);
+          }
+        });
+      toast('Copied to clipboard');
+    } catch(err){
+      console.error(err);
+      alert('Copy failed (your browser may require HTTPS). Use Download instead.');
+    }
+  });
+
+  downloadBtn.addEventListener('click', async ()=>{
+    if(outCanvas.width === 0){ alert('No output yet. Click Apply first.'); return; }
+    const url = outCanvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = url; a.download = 'transformed.png';
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+
+  // tiny toast
+  function toast(msg){
+    const t = document.createElement('div');
+    t.textContent = msg;
+    t.style.position='fixed'; t.style.bottom='20px'; t.style.left='50%'; t.style.transform='translateX(-50%)';
+    t.style.background='rgba(2,6,23,.9)'; t.style.border='1px solid rgba(148,163,184,.35)'; t.style.padding='10px 14px'; t.style.borderRadius='12px';
+    t.style.color='var(--text)'; t.style.boxShadow='0 8px 24px rgba(0,0,0,.4)';
+    document.body.appendChild(t);
+    setTimeout(()=>t.remove(),1200);
+  }
+})();
+</script>
+</body>
+</html>
